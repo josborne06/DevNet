@@ -13,19 +13,19 @@
           - show cdp neighbors detail
       register: cdp_output
 
-    - name: Parse CDP neighbors output (basic regex fallback)
+    - name: Parse CDP neighbors output (simple inline parser)
       set_fact:
         cdp_neighbors: >-
-          {{ cdp_output.stdout[0] | regex_findallall('Device ID: (.*?)\\n.*?Interface: (.*?), Port ID \(outgoing port\): (.*?)\\n') }}
+          {{ cdp_output.stdout[0].split('-------------------------')[1:] | map('regex_search', 'Device ID: (.*?)\n.*?Interface: (.*?), Port ID \(outgoing port\): (.*?)\n', '\1|\2|\3') | list }}
 
     - name: Format connection map from CDP data
       set_fact:
         connection_map: >-
           {{ connection_map | default([]) + [{
             'device_a': inventory_hostname,
-            'interface_a': item[1],
-            'device_b': item[0],
-            'interface_b': item[2]
+            'interface_a': item.split('|')[1],
+            'device_b': item.split('|')[0],
+            'interface_b': item.split('|')[2]
           }] }}
       loop: "{{ cdp_neighbors }}"
 
