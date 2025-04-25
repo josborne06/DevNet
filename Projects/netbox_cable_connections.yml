@@ -1,0 +1,80 @@
+---
+- name: Dynamic CDP to NetBox Cable Mapping
+  hosts: cisco_devices
+  gather_facts: no
+  vars:
+    netbox_url: "http://your-netbox-url"
+    netbox_token: "your_netbox_api_token"
+  tasks:
+
+    - name: Gather CDP neighbors from devices
+      ios_command:
+        commands:
+          - show cdp neighbors detail
+      register: cdp_output
+
+    - name: Parse CDP neighbors output (simple inline parser)
+      set_fact:
+        cdp_neighbors: >-
+          {{ cdp_output.stdout[0].split('-------------------------')[1:] | map('regex_search', 'Device ID: (.*?)\n.*?Interface: (.*?), Port ID \(outgoing port\): (.*?)\n', '\1|\2|\3') | list }}
+
+    - name: Format connection map from CDP data
+      set_fact:
+        connection_map: >-
+          {{ connection_map | default([]) + [{
+            'device_a': inventory_hostname,
+            'interface_a': item.split('|')[1],
+            'device_b': item.split('|')[0],
+            'interface_b': item.split('|')[2]
+          }] }}
+      loop: "{{ cdp_neighbors }}"
+
+    - name: Get interface ID for device A
+      uri:
+        url: "{{ netbox_url }}/api/dcim/interfaces/?device={{ item.device_a }}&name={{ item.interface_a }}"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+      register: a_interface
+      loop: "{{ connection_map }}"
+      loop_control:
+        label: "{{ item.device_a }} - {{ item.interface_a }}"
+
+    - name: Get interface ID for device B
+      uri:
+        url: "{{ netbox_url }}/api/dcim/interfaces/?device={{ item.device_b }}&name={{ item.interface_b }}"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+      register: b_interface
+      loop: "{{ connection_map }}"
+      loop_control:
+        label: "{{ item.device_b }} - {{ item.interface_b }}"
+
+    - name: Create cable in NetBox between interfaces
+      uri:
+        url: "{{ netbox_url }}/api/dcim/cables/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: >-
+          {
+            "type": "cat6",
+            "status": "connected",
+            "a_terminations": {
+              "object_type": "dcim.interface",
+              "object_id": {{ a_interface.results[loop.index0].json.results[0].id }}
+            },
+            "b_terminations": {
+              "object_type": "dcim.interface",
+              "object_id": {{ b_interface.results[loop.index0].json.results[0].id }}
+            }
+          }
+        status_code: 201
+      loop: "{{ connection_map }}"
+      loop_control:
+        label: "Cable: {{ item.device_a }} - {{ item.device_b }}"
