@@ -1,4 +1,3 @@
-```markdown
 # 🤗 Hugging Face Cheat Sheet for Engineers
 
 **Hugging Face** makes it easy to use pretrained machine learning models for tasks like text analysis, code generation, log summarization, anomaly detection, and more — all with friendly Python APIs and powerful open-source tools.
